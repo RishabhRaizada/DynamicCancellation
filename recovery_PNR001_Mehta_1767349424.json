@@ -1,0 +1,40 @@
+{
+  "formatted": "# \ud83d\udeeb FLIGHT RECOVERY COMPLETED\n\n## \ud83d\udccb PASSENGER DETAILS\n- **Name:** Karan Mehta\n- **PNR:** PNR001\n- **Contact:** karan.mehta1@mail.com | 9863359549\n\n## \u2708\ufe0f ORIGINAL FLIGHT (CANCELLED)\n- **Flight:** 6E101\n- **Route:** DEL \u2192 BOM\n- **Scheduled:** 2025-12-27T00:30:00\n\n## \u2705 RECOVERY FLIGHT (CONFIRMED)\n- **Flight:** 6E102\n- **Route:** DEL \u2192 BOM\n- **Departure:** 2025-12-27T02:30:00\n- **Arrival:** 2025-12-27T04:45:00\n- **Aircraft:** A320\n\n## \ud83d\udcba SEAT ASSIGNMENT\n- **Seat:** 12A\n- **Class:** Economy\n- **Type:** Window\n\n## \ud83c\udfab ADDITIONAL INFORMATION\n- **Recovery ID:** MCP-REC-PNR001-1767349412\n- **Status:** SUCCESS\n- **Reason:** AUTO_RECOVERY_COMPLETED\n- **Processed:** 2026-01-02T15:53:32Z\n\n## \ud83d\udccb NEXT STEPS\n1. Proceed to check-in counter B4\n2. Present your PNR and Recovery ID\n3. Boarding starts 45 minutes before departure\n4. Baggage has been automatically transferred\n\n*Need assistance? Visit any customer service desk.*",
+  "raw": {
+    "final": true,
+    "status": "success",
+    "pnr": "PNR001",
+    "passenger": {
+      "last_name": "Mehta",
+      "email": "karan.mehta1@mail.com",
+      "phone": "9863359549",
+      "first_name": "Karan"
+    },
+    "original_flight": {
+      "flight_number": "6E101",
+      "origin": "DEL",
+      "destination": "BOM",
+      "scheduled_departure": "2025-12-27T00:30:00"
+    },
+    "selected_flight": {
+      "flight_number": "6E102",
+      "origin": "DEL",
+      "destination": "BOM",
+      "departure": "2025-12-27T02:30:00",
+      "arrival": "2025-12-27T04:45:00",
+      "aircraft": "A320",
+      "status": "Scheduled"
+    },
+    "selected_seat": {
+      "seat_number": "12A",
+      "class": "Economy",
+      "type": "Window",
+      "available": true
+    },
+    "reason": "AUTO_RECOVERY_COMPLETED",
+    "timestamp": "2026-01-02T15:53:32Z",
+    "recovery_id": "MCP-REC-PNR001-1767349412"
+  },
+  "timestamp": "2026-01-02 15:53:44",
+  "agent_used": true
+}

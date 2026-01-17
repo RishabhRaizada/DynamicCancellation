@@ -1,0 +1,13 @@
+fastmcp>=0.3.0
+pydantic>=2.5.0
+
+POST - CURL {PNR - LAST} 
+GET - http://127.0.0.1:8003/get
+DELETE
+
+
+http://127.0.0.1:8003/get
+CALCULATION 
+AGENT 
+
+OUTPUT
