@@ -11,3 +11,5 @@ CALCULATION
 AGENT 
 
 OUTPUT
+
+Precendence to the Current booking in prompt

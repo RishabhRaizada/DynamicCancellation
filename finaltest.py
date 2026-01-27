@@ -4,7 +4,7 @@ import requests
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from azure.ai.agents.models import ListSortOrder
-
+import time
 
 PROJECT_ENDPOINT = "https://testapiagent-resource.services.ai.azure.com/api/projects/testapiagent"
 AGENT_ID = "asst_fVKKUVovJ6FGONPYJOV3pe21"
@@ -71,7 +71,9 @@ def execute_mcp_tool(tool_name: str, arguments: dict):
 # ==============================
 # AGENT RUNNER
 # ==============================
-
+# ==============================
+# 4️⃣ AGENT INVOCATION (SUCCESS ONLY)
+# ==============================
 def run_agent(pnr: str, last_name: str):
     print("\n🚀 Running manual MCP + Agent reasoning")
     print(f"PNR: {pnr}, LAST NAME: {last_name}")
@@ -99,7 +101,7 @@ def run_agent(pnr: str, last_name: str):
             "reason": mcp_data.get("reason"),
             "message": "Passenger not eligible for auto-recovery. Agent NOT invoked."
         }, indent=2))
-        return  # 🚨 ABSOLUTE STOP — AGENT WILL NEVER RUN
+        return
 
     # ==============================
     # 3️⃣ SAFETY CHECK (DEFENSIVE)
@@ -111,7 +113,7 @@ def run_agent(pnr: str, last_name: str):
         return
 
     # ==============================
-    # 4️⃣ AGENT INVOCATION (SUCCESS ONLY)
+    # 4️⃣ AGENT INVOCATION WITH EMBEDDED DATA
     # ==============================
     client = AIProjectClient(
         endpoint=PROJECT_ENDPOINT,
@@ -121,12 +123,10 @@ def run_agent(pnr: str, last_name: str):
     with client:
         thread = client.agents.threads.create()
 
-        client.agents.messages.create(
-            thread_id=thread.id,
-            role="user",
-            content=f"""
-You are a STRICT Flight & Seat Recovery Decision Engine.
-Passenger Profile:
+        # ✅ CRITICAL: Embed the actual MCP data into the prompt
+        agent_prompt = f"""
+You are a CLOSED-WORLD Flight & Seat Decision Engine.
+
 --------------------------------
 INPUT DATA (ACTUAL MCP RESPONSE - THIS IS YOUR UNIVERSE)
 --------------------------------
@@ -142,152 +142,87 @@ Available Flights (YOU MUST SELECT FROM THIS LIST):
 
 Available Seats (YOU MUST SELECT FROM THIS LIST):
 {json.dumps(recovery.get('available_seats', []), indent=2)}
-You are a STRICT Flight & Seat Optimization Engine.
-
-ABSOLUTE RULES (FAIL IF VIOLATED):
-1. You MUST ONLY use flights and seats provided in the input JSON.
-2. You MUST NOT invent flight_uid, flight_number, seat_number, or prices.
-3. If any identifier is not found in the input → FAIL.
---------------------------------
-ORIGINAL BOOKING CONSTRAINTS (MANDATORY)
---------------------------------
-
-The original_flight represents the passenger's contractual booking intent.
-
-MANDATORY RULES:
-
-1. Route Preservation:
-- selected_flight.origin MUST equal original_flight.origin
-- selected_flight.destination MUST equal original_flight.destination
-- If no such flight exists → FAIL
-
-2. Time Proximity:
-- Prefer flights whose utcDeparture is closest to original_flight.utc_scheduled_departure
-- Prefer earlier arrival over later arrival when possible
-
-3. Cabin Preservation:
-- If original_flight.cabin_class == "Business":
-  - Must preserve Business cabin in recovery
-  - Only downgrade if no business seats exist
-- If original_flight.cabin_class == "Economy":
-  - Economy acceptable, upgrade optional for highspender
-
-These rules apply BEFORE CDP logic.
-CDP rules apply only after these booking constraints are satisfied.
 
 --------------------------------
-PRIORITY 0 (ORIGINAL BOOKING OVERRIDE)
+ABSOLUTE CONSTRAINTS (NON-NEGOTIABLE)
 --------------------------------
 
-If original_flight.cabin_class == "Business":
-- ALWAYS select a flight that has min_business_fare available
-- ALWAYS select a seat with travel_class == "C"
-- This rule OVERRIDES STUDENT logic
-- Only downgrade to Economy if NO business seats exist
-
-
-If student > 0 AND original_flight.cabin_class == "Economy":
-- MUST NOT select travel_class == "C"
-- MUST select economy class only
-- FAIL if only business seats are selected
-
-If original_flight.cabin_class == "Economy":
-- Proceed with CDP rules as defined
-
-
+1. You are operating in a CLOSED DATA WORLD - ONLY use data from above.
+2. You MUST ONLY select flights from the "Available Flights" list above.
+3. You MUST ONLY select seats from the "Available Seats" list above.
+4. The above data is the COMPLETE universe - DO NOT invent or assume anything else.
+5. If a value is not in the lists above, it DOES NOT EXIST.
 
 --------------------------------
-CDP PRIORITY ORDER (MANDATORY)
+SEAT SELECTION SCOPE
 --------------------------------
 
-Evaluate booking_details[0] first.
+Seats are GLOBAL across all flights. Choose any seat from available_seats list.
 
-PRIORITY 1 (OVERRIDES EVERYTHING):
+--------------------------------
+PRIORITY RULES (APPLY TO booking_details[0] ONLY)
+--------------------------------
+
+PRIORITY 1 — STUDENT (OVERRIDES ALL)
 - If STUDENT > 0:
-  - ALWAYS choose the CHEAPEST min_economy_fare flight
+  - Choose flight with LOWEST `min_economy_fare`
   - NEVER choose business class
-  - Seat priority: cheapest economy seat, ignore comfort
-  - Comfort signals (LEGROOM, XL, AISLE) are SECONDARY
+  - Seat: economy only
 
-- If HIGHSPENDERHIGHFREQ == true OR HIGHSPENDERLOWFREQ == true:
-  - Price is IRRELEVANT
-  - Prefer comfort, stretch, business class
-  - Prefer earlier arrival and non-stop
+PRIORITY 2 — HIGH SPENDER
+- If HIGHSPENDERHIGHFREQ or HIGHSPENDERLOWFREQ is true:
+  - Prefer comfort over price
+  - Prefer stretch / business seats
+  - Prefer earlier arrival
 
---------------------------------
-PRIORITY 2 (ONLY IF NOT STUDENT / HIGHSPENDER)
---------------------------------
-
-Journey Intent:
-- BUSINESS > LEISURE → time + comfort
-- LEISURE >= BUSINESS → cost + flexibility
+PRIORITY 3 — GENERAL
+- NonStop preferred
+- Earlier arrival preferred
+- Lower fare preferred
+- fillingFast is negative
 
 --------------------------------
-FLIGHT SCORING (STRICT)
+SINGLE FLIGHT RULE
 --------------------------------
 
-For EACH available flight:
-
-Start score = 0
-
-Base:
-+40 if NonStop
-+25 if utcArrival earlier than original flight
-+20 if utcDeparture closest to original flight
--15 if fillingFast == true
-
-STUDENT OVERRIDE:
-- score = -min_economy_fare
-- IGNORE all comfort bonuses
-
-HIGHSPENDER OVERRIDE:
-+40 if isStretch == true
-+30 if min_business_fare exists
+If only 1 flight available (as shown above):
+- You MUST select that exact flight
+- DO NOT compare or invent alternatives
 
 --------------------------------
-SEAT SCORING (STRICT)
+SEAT FALLBACK RULE
 --------------------------------
 
-For EACH seat on SELECTED flight:
-
-Start score = 0
-
-STUDENT OVERRIDE:
-- Prefer travel_class == "Y"
-- Ignore LEGROOM, XL, WINDOW, AISLE
-- Pick seat with highest availability or lowest cost proxy
-
-HIGHSPENDER OVERRIDE:
-+40 if travel_class == "C"
-+25 if LEGROOM
-+20 if XL
-+15 if AISLE or WINDOW
+If seat price is NOT provided:
+- Treat ALL economy seats as equal cost
+- Select the FIRST economy seat in available_seats
 
 --------------------------------
-OUTPUT (STRICT JSON ONLY)
+OUTPUT FORMAT (STRICT)
 --------------------------------
+
+Return ONLY valid JSON.
+
+If selection succeeds:
 
 {{
-  "cdp_summary": {{
-    "student": number,
-    "highspender": boolean,
-    "business": number,
-    "leisure": number
-  }},
-  "selected_flight": {{ ... }},
-  "selected_seat": {{ ... }},
+  "selected_flight": {{ EXACT COPY FROM AVAILABLE_FLIGHTS LIST }},
+  "selected_seat": {{ EXACT COPY FROM AVAILABLE_SEATS LIST }},
   "reasoning": {{
-    "flight_reason": "Explicitly reference STUDENT or HIGHSPENDER rule",
-    "seat_reason": "Explicitly reference STUDENT or HIGHSPENDER rule"
+    "flight_reason": "Reason based ONLY on provided CDP + rules",
+    "seat_reason": "Reason based ONLY on provided CDP + rules"
   }}
 }}
 
-FAIL IF:
-- Cheapest flight is NOT selected for STUDENT
-- Business class is selected for STUDENT
-- Any invented ID appears
-
+If ANY rule violated or data missing:
+Return EXACTLY:
+{{}}
 """
+
+        client.agents.messages.create(
+            thread_id=thread.id,
+            role="user",
+            content=agent_prompt
         )
 
         run = client.agents.runs.create(
@@ -299,6 +234,7 @@ FAIL IF:
             run = client.agents.runs.get(thread.id, run.id)
             if run.status == "completed":
                 break
+            time.sleep(0.5)  # Add small delay to avoid busy waiting
 
         messages = client.agents.messages.list(
             thread_id=thread.id,

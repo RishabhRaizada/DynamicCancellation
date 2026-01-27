@@ -5,40 +5,38 @@ from fastmcp import FastMCP
 from tools.validator import validate_request
 from tools.profile import find_users
 
-# -------------------------------------------------
-# LOGGING
-# -------------------------------------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("flight-disruption-mcp")
 
-# -------------------------------------------------
-# MCP SERVER
-# -------------------------------------------------
+
 mcp = FastMCP("flight_disruption_mcp")
 
-# -------------------------------------------------
-# LOAD STATIC DATA
-# -------------------------------------------------
+
 with open("data/cancell_trigger.json", "r", encoding="utf-8") as f:
     CANCELLATIONS = json.load(f)
 
 with open("data/available_seats.json", "r", encoding="utf-8") as f:
     AVAILABLE_SEATS = json.load(f)
-
-with open("data/flights-dataa-extended.json", "r", encoding="utf-8") as f:
+with open(
+    "data/flights-dataa-extended.json",
+    "r",
+    encoding="utf-8"
+) as f:
     FLIGHTS_DATA = json.load(f)
 
-# -------------------------------------------------
-# HELPERS
-# -------------------------------------------------
+
 def find_cancellation(pnr: str):
     for c in CANCELLATIONS:
         if c.get("pnr") == pnr:
             return c
     return None
 
-
 def extract_available_seats_from_seatmap(seatmap_json: dict):
+    """
+    Extracts UNIQUE, assignable, available seats
+    with explicit seat types.
+    """
+
     seats = {}
     seat_maps = seatmap_json.get("data", {}).get("seatMaps", [])
 
@@ -50,7 +48,9 @@ def extract_available_seats_from_seatmap(seatmap_json: dict):
             compartments = deck.get("compartments", {})
 
             for cabin in compartments.values():
-                for seat in cabin.get("units", []):
+                units = cabin.get("units", [])
+
+                for seat in units:
                     if not (
                         seat.get("assignable") is True
                         and seat.get("availability", 0) > 0
@@ -59,18 +59,23 @@ def extract_available_seats_from_seatmap(seatmap_json: dict):
 
                     seat_number = seat.get("designator")
                     travel_class = seat.get("travelClassCode")
+
                     key = f"{seat_number}-{travel_class}"
 
                     if key in seats:
-                        continue
+                        continue  
 
-                    seat_types = [
-                        p.get("code")
-                        for p in seat.get("properties", [])
-                        if p.get("code") in {
-                            "WINDOW", "AISLE", "LEGROOM", "XL", "STRETCH"
-                        }
-                    ]
+                    seat_types = []
+                    for prop in seat.get("properties", []):
+                        code = prop.get("code")
+                        if code in {
+                            "WINDOW",
+                            "AISLE",
+                            "LEGROOM",
+                            "XL",
+                            "STRETCH"
+                        }:
+                            seat_types.append(code)
 
                     seats[key] = {
                         "seat_number": seat_number,
@@ -81,18 +86,24 @@ def extract_available_seats_from_seatmap(seatmap_json: dict):
 
     return list(seats.values())
 
-
 def extract_available_flights(flights_json: dict):
+    """
+    Extract minimal, decision-ready flight data for agent ranking.
+    """
+
     flights = {}
+
     trips = flights_json.get("data", {}).get("trips", [])
 
     for trip in trips:
-        for journey in trip.get("journeysAvailable", []):
+        journeys = trip.get("journeysAvailable", [])
+
+        for journey in journeys:
             segments = journey.get("segments", [])
             if not segments:
                 continue
 
-            segment = segments[0]
+            segment = segments[0] 
             identifier = segment.get("identifier", {})
             designator = segment.get("designator", {})
 
@@ -104,17 +115,18 @@ def extract_available_flights(flights_json: dict):
                 continue
 
             flight_uid = journey.get("journeyKey")
+
             if flight_uid in flights:
                 continue
 
-            economy = []
-            business = []
+            economy_prices = []
+            business_prices = []
 
             for f in journey.get("passengerFares") or []:
                 if f.get("FareClass") == "Economy":
-                    economy.append(f.get("totalFareAmount"))
+                    economy_prices.append(f.get("totalFareAmount"))
                 elif f.get("FareClass") == "Business":
-                    business.append(f.get("totalFareAmount"))
+                    business_prices.append(f.get("totalFareAmount"))
 
             flights[flight_uid] = {
                 "flight_uid": flight_uid,
@@ -127,19 +139,26 @@ def extract_available_flights(flights_json: dict):
                 "flightType": journey.get("flightType"),
                 "isStretch": segment.get("isStretch", False),
                 "fillingFast": journey.get("fillingFast", False),
-                "min_economy_fare": min(economy) if economy else None,
-                "min_business_fare": min(business) if business else None
+                "min_economy_fare": min(economy_prices) if economy_prices else None,
+                "min_business_fare": min(business_prices) if business_prices else None
             }
 
     return list(flights.values())
 
 
+# SINGLE MCP TOOL 
+
 @mcp.tool()
 def recover_passenger(pnr: str, last_name: str):
-    logger.info("🚑 recover_passenger called")
-    logger.info("PNR=%s LAST_NAME=%s", pnr, last_name)
+    """
+    FULL recovery in one call.
+    This tool ALWAYS returns a FINAL response.
+    """
 
-    # 1️⃣ Validate input
+    logger.info("🚑 recover_passenger called")
+    logger.info(f"PNR={pnr}, LAST_NAME={last_name}")
+
+
     if not pnr or not last_name:
         return {
             "content": [{
@@ -152,8 +171,9 @@ def recover_passenger(pnr: str, last_name: str):
             }]
         }
 
-    # 2️⃣ Find cancellation
+
     cancellation = find_cancellation(pnr)
+
     if not cancellation:
         return {
             "content": [{
@@ -166,29 +186,10 @@ def recover_passenger(pnr: str, last_name: str):
             }]
         }
 
-    # 3️⃣ Disruption gate (CRITICAL)
-    event_type = cancellation.get("event_type")
-    logger.info("📡 Event type: %s", event_type)
-
-    if event_type != "flight_cancelled":
-        logger.warning("🚫 No disruption — recovery not applicable")
-
-        return {
-            "content": [{
-                "type": "json",
-                "json": {
-                    "final": True,
-                    "status": "not_applicable",
-                    "reason": "NO_FLIGHT_DISRUPTION",
-                    "pnr": pnr
-                }
-            }]
-        }
-
-    # 4️⃣ Eligibility check
     user_info = cancellation.get("user_info", {})
     email = user_info.get("USR_EMAIL")
     phone = str(user_info.get("USR_MOBILE", ""))
+
 
     eligibility = validate_request(
         last_name=last_name,
@@ -196,8 +197,6 @@ def recover_passenger(pnr: str, last_name: str):
     )
 
     if not eligibility or eligibility.get("eligible") is False:
-        logger.warning("🚫 Passenger not eligible for recovery")
-
         return {
             "content": [{
                 "type": "json",
@@ -209,59 +208,56 @@ def recover_passenger(pnr: str, last_name: str):
             }]
         }
 
-    # 5️⃣ Fetch CDP profile
+
     profile = find_users(
         last_name=last_name,
         email_or_phone=email or phone
     )
 
-    # 6️⃣ Extract alternatives
+
     available_seats = extract_available_seats_from_seatmap(AVAILABLE_SEATS)
+
+
     available_flights = extract_available_flights(FLIGHTS_DATA)
 
-    # 🔍 Visibility logs
-    logger.info("✈️ Flights extracted: %d", len(available_flights))
-    logger.info("💺 Seats extracted: %d", len(available_seats))
-    logger.info("📊 Profile records: %d", len(profile) if profile else 0)
 
-    # 7️⃣ Final payload
-    final_payload = {
-        "final": True,
-        "status": "success",
-        "pnr": pnr,
-        "passenger": {
-            "last_name": last_name,
-            "email": email,
-            "phone": phone,
-            "Past Data": profile
-        },
-        "original_flight": cancellation,
-        "recovery": {
-            "available_flights": available_flights,
-            "available_seats": available_seats
-        }
+
+    return {
+        "content": [{
+            "type": "json",
+            "json": {
+                "final": True,
+                "status": "success",
+                "pnr": pnr,
+                "passenger": {
+                    "last_name": last_name,
+                    "email": email,
+                    "phone": phone,
+                    "Past Data": profile
+                },
+                "original_flight": {
+                    "flight_number": cancellation.get("flight_number"),
+                    "origin": cancellation.get("origin"),
+                    "destination": cancellation.get("destination"),
+                    "cabin_class": cancellation.get("cabin_class")
+                },
+                "recovery": {
+                    "available_flights": available_flights,
+                    "available_seats": available_seats
+
+                                    }
+                                }
+                
+                            }]
     }
-
-    logger.info("📦 FINAL MCP PAYLOAD SUMMARY")
+    logger.info("📦 FINAL MCP PAYLOAD (keys only)")
     logger.info({
         "status": final_payload["status"],
         "has_profile": bool(profile),
         "flights_count": len(available_flights),
         "seats_count": len(available_seats)
     })
-    logger.info("✈️ Available Flights (FULL):")
-    for idx, f in enumerate(available_flights):
-        logger.info(f"[FLIGHT {idx}] {json.dumps(f, indent=2)}")
-    return {
-        "content": [{
-            "type": "json",
-            "json": final_payload
-        }]
-    }
 
-# -------------------------------------------------
-# RUN SERVER
-# -------------------------------------------------
 if __name__ == "__main__":
     mcp.run(
         transport="streamable-http",
