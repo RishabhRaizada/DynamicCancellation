@@ -4775,7 +4775,7 @@
         "DEPENDENTTRAVEL": 2,
         "FOREIGNCURRENCY": 1,
         "HIGHSPENDERLOWFREQ": false,
-        "HIGHSPENDERHIGHFREQ": true,
+        "HIGHSPENDERHIGHFREQ": false,
         "LOWSPENDERLOWFREQ": false,
         "LOWSPENDERHIGHFREQ": false,
         "AVGWEIGHTDOM": 17.9,

@@ -53,7 +53,6 @@ def execute_mcp_tool(tool_name: str, arguments: dict):
             print("✅ MCP JSON received (structuredContent)")
             return content[0]["json"]
 
-        # 🔄 Fallback: content[].text contains JSON string
         for item in result.get("content", []):
             if item.get("type") == "text":
                 try:
@@ -65,12 +64,9 @@ def execute_mcp_tool(tool_name: str, arguments: dict):
                 except Exception:
                     pass
 
-    # ❌ If we reach here, parsing failed
     raise RuntimeError("No MCP JSON response found in SSE stream")
 
-# ==============================
-# AGENT RUNNER
-# ==============================
+
 
 def run_agent(pnr: str, last_name: str):
     print("\n🚀 Running manual MCP + Agent reasoning")

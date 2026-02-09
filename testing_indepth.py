@@ -1,9 +1,17 @@
 import sys
 import json
+import time
+from datetime import datetime
 import requests
+
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from azure.ai.agents.models import ListSortOrder
+
+
+# ==============================
+# CONFIG
+# ==============================
 
 PROJECT_ENDPOINT = "https://testapiagent-resource.services.ai.azure.com/api/projects/testapiagent"
 AGENT_ID = "asst_fVKKUVovJ6FGONPYJOV3pe21"
@@ -11,9 +19,17 @@ MCP_URL = "http://127.0.0.1:8003/mcp"
 
 
 # ==============================
-# MCP CALL
+# MCP EXECUTION
 # ==============================
+
 def execute_mcp_tool(tool_name: str, arguments: dict):
+    start_time = time.perf_counter()
+    start_ts = datetime.utcnow().isoformat()
+
+    print(f"\n🔮 Executing MCP Tool: {tool_name}")
+    print(f"📝 Arguments: {arguments}")
+    print(f"⏱ MCP START: {start_ts} UTC")
+
     payload = {
         "jsonrpc": "2.0",
         "method": "tools/call",
@@ -25,71 +41,108 @@ def execute_mcp_tool(tool_name: str, arguments: dict):
     }
 
     headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream"
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json"
     }
 
-    response = requests.post(MCP_URL, json=payload, headers=headers, timeout=30)
+    response = requests.post(
+        MCP_URL,
+        json=payload,
+        headers=headers,
+        timeout=30
+    )
 
     if response.status_code != 200:
-        raise RuntimeError(f"MCP call failed: {response.status_code} {response.text}")
+        raise RuntimeError(
+            f"MCP call failed: {response.status_code} {response.text}"
+        )
 
-    text = response.text.strip()
+    for line in response.text.splitlines():
+        if not line.startswith("data:"):
+            continue
 
-    # --- Handle JSON or SSE ---
-    if text.startswith("{"):
-        rpc_response = json.loads(text)
-    else:
-        rpc_response = None
-        for line in text.splitlines():
-            if line.startswith("data:"):
-                data_part = line.replace("data:", "", 1).strip()
-                if data_part.startswith("{"):
-                    rpc_response = json.loads(data_part)
-                    break
-        if rpc_response is None:
-            raise RuntimeError("No JSON found in MCP response")
+        raw = line.replace("data:", "", 1).strip()
+        mcp_payload = json.loads(raw)
 
-    # --- Extract FastMCP structured JSON ---
-    result = rpc_response.get("result", {})
-    structured = result.get("structuredContent", {})
-    content = structured.get("content", [])
+        result = mcp_payload.get("result", {})
 
-    if content and content[0].get("type") == "json":
-        return content[0]["json"]
+        structured = result.get("structuredContent", {})
+        content = structured.get("content", [])
 
-    raise RuntimeError("Invalid MCP response format")
+        if content and content[0].get("type") == "json":
+            end_time = time.perf_counter()
+            print(f"⏱ MCP END: {datetime.utcnow().isoformat()} UTC")
+            print(f"⏳ MCP DURATION: {end_time - start_time:.3f}s")
+            return content[0]["json"]
+
+        for item in result.get("content", []):
+            if item.get("type") == "text":
+                try:
+                    embedded = json.loads(item["text"])
+                    for c in embedded.get("content", []):
+                        if c.get("type") == "json":
+                            end_time = time.perf_counter()
+                            print(f"⏱ MCP END: {datetime.utcnow().isoformat()} UTC")
+                            print(f"⏳ MCP DURATION: {end_time - start_time:.3f}s")
+                            return c["json"]
+                except Exception:
+                    pass
+
+    raise RuntimeError("No MCP JSON response found in SSE stream")
 
 
 # ==============================
-# AGENT RUNNER
+# AGENT PIPELINE
 # ==============================
+
 def run_agent(pnr: str, last_name: str):
-    print("\n🚀 Running MCP + Agent Flow")
-    print(f"PNR: {pnr}, LAST NAME: {last_name}")
+    overall_start = time.perf_counter()
 
-    # 1️⃣ Call MCP
+    print("\n🚀 STARTING MANUAL MCP + AGENT PIPELINE")
+    print(f"PNR: {pnr} | LAST NAME: {last_name}")
+
+    # ==============================
+    # 1️⃣ MCP CALL
+    # ==============================
+
     mcp_data = execute_mcp_tool(
         "recover_passenger",
         {"pnr": pnr, "last_name": last_name}
     )
 
-    print("\n📦 MCP RESPONSE:")
+    print("\n📦 MCP RESPONSE")
     print(json.dumps(mcp_data, indent=2))
 
-    # 2️⃣ Stop if not success
-    status = mcp_data.get("status")
-    if status != "success":
-        print("\n⛔ Recovery stopped:", status)
+    # ==============================
+    # 2️⃣ HARD STOP – ELIGIBILITY
+    # ==============================
+
+    if mcp_data.get("status") != "success":
+        print("\n⛔ RECOVERY FLOW STOPPED")
+        print(json.dumps({
+            "status": mcp_data.get("status"),
+            "reason": mcp_data.get("reason"),
+            "message": "Passenger not eligible for auto-recovery. Agent NOT invoked."
+        }, indent=2))
         return
 
-    # 3️⃣ Safety check
+    # ==============================
+    # 3️⃣ SAFETY CHECK
+    # ==============================
+
     recovery = mcp_data.get("recovery", {})
     if not recovery.get("available_flights") or not recovery.get("available_seats"):
-        print("\n⛔ Flights or seats missing — agent blocked.")
+        print("\n⛔ INCOMPLETE RECOVERY CONTEXT")
+        print("Flights or seats missing — agent invocation blocked.")
         return
 
-    # 4️⃣ Invoke Azure Agent
+    # ==============================
+    # 4️⃣ AGENT EXECUTION
+    # ==============================
+
+    agent_start = time.perf_counter()
+    print(f"\n🤖 AGENT START: {datetime.utcnow().isoformat()} UTC")
+
     client = AIProjectClient(
         endpoint=PROJECT_ENDPOINT,
         credential=DefaultAzureCredential()
@@ -102,18 +155,24 @@ def run_agent(pnr: str, last_name: str):
             thread_id=thread.id,
             role="user",
             content=f"""
-Passenger:
+You are a STRICT Flight & Seat Recovery Decision Engine.
+Passenger Profile:
+--------------------------------
+INPUT DATA (ACTUAL MCP RESPONSE - THIS IS YOUR UNIVERSE)
+--------------------------------
+
+Passenger Profile:
 {json.dumps(mcp_data.get('passenger', {}), indent=2)}
 
 Original Flight:
 {json.dumps(mcp_data.get('original_flight', {}), indent=2)}
 
-Available Flights:
+Available Flights (YOU MUST SELECT FROM THIS LIST):
 {json.dumps(recovery.get('available_flights', []), indent=2)}
 
-Available Seats:
+Available Seats (YOU MUST SELECT FROM THIS LIST):
 {json.dumps(recovery.get('available_seats', []), indent=2)}
-
+You are a STRICT Flight & Seat Optimization Engine.
 
 ABSOLUTE RULES (FAIL IF VIOLATED):
 1. You MUST ONLY use flights and seats provided in the input JSON.
@@ -271,21 +330,50 @@ FAIL IF:
             if run.status == "completed":
                 break
 
+        agent_end = time.perf_counter()
+        print(f"🤖 AGENT END: {datetime.utcnow().isoformat()} UTC")
+        print(f"⏳ AGENT DURATION: {agent_end - agent_start:.3f}s")
+
+        # ==============================
+        # TOKEN USAGE
+        # ==============================
+
+        usage = getattr(run, "usage", None)
+
+        if usage:
+            print("\n📊 TOKEN USAGE")
+            print(json.dumps({
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+                "total_tokens": usage.total_tokens
+            }, indent=2))
+        else:
+            print("\n⚠️ Token usage not available")
+
+        # ==============================
+        # OUTPUT
+        # ==============================
+
         messages = client.agents.messages.list(
             thread_id=thread.id,
             order=ListSortOrder.ASCENDING
         )
 
-        print("\n🎯 FINAL AGENT OUTPUT:")
+        print("\n🎯 FINAL AGENT OUTPUT")
         for msg in reversed(list(messages)):
             if msg.role == "assistant":
                 print(msg.text_messages[0].text.value)
                 break
 
+    overall_end = time.perf_counter()
+    print("\n⏱ TOTAL PIPELINE TIME")
+    print(f"{overall_end - overall_start:.3f} seconds")
+
 
 # ==============================
-# ENTRY
+# ENTRYPOINT
 # ==============================
+
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Usage: python testing.py <PNR> <LAST_NAME>")

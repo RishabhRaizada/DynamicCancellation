@@ -1,30 +1,94 @@
-# import requests
-
-# def get_anonymous_token():
-#     url = "https://dotrezapi.test.6e.navitaire.com/api/auth/v1-beta/token/anonymous"
-    
-#     headers = {
-#         "accept": "application/json",
-#         "Content-Type": "application/json"
-#     }
-    
-#     payload = {
-#         "applicationName": "IndiGoUAT",
-#         "cultureCode": "en-IN",
-#         "newSession": True
-#     }
-    
-#     response = requests.post(url, json=payload, headers=headers, timeout=30)
-    
-#     if response.status_code != 200:
-#         raise Exception(f"Token request failed: {response.status_code} - {response.text}")
-    
-#     data = response.json()
-#     return data["token"]   # short-lived anonymous JWT
 import requests
 
-try:
-    r = requests.get("https://dotrezapi.test.6e.navitaire.com/health", timeout=10)
-    print("Reachable:", r.status_code)
-except Exception as e:
-    print("Connection error:", e)
+url = "https://api-uat-mobile-skyplus6e.goindigo.in/flightsearch/v1/flight/search"
+
+headers = {
+    "accept": "application/json, text/plain, */*",
+    "content-type": "application/json",
+    "user_key": "2945e931b5e99bceed811fd202713432",
+    "x-acf-sensor-data": "6,a,CTFQy+MyHDwvPKjyPz1dyxkZGg/tadL9bLYzWkTttUqVRo/RpmSgaiCSlaMHplO6r72BdakC56KbIXX2CqxuSfruob759H352r7aRzZYx9mULpNG+msxUNcQLa0robNX5wDXFYGruYkZFpI9aRF8e4aY68eVzEhq1CnIPAAyaIU=...",
+    "source": "android",
+    "version": "7.3.3",
+    "user-agent": "IndiGoUAT/7.3.3.1 (Android 15; Build/AE3A.240806.036)",
+    "authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJpYmUiLCJqdGkiOiJmZmU1ZTI2Yy1jNThlLTI0ZGYtZjdkOC01M2Y0MjZjMmU0NDEiLCJpc3MiOiJkb3RSRVogQVBJIn0.5PnJFN_jwB2VJSb9uj4_l2HiynVTco6AJV_2ewAIoKk"
+}
+
+raw_body = """
+{
+  "codes": {
+    "currency": "INR",
+    "vaxDoseNo": ""
+  },
+  "criteria": [
+    {
+      "dates": {
+        "beginDate": "2026-01-30"
+      },
+      "flightFilters": {
+        "type": "All"
+      },
+      "stations": {
+        "originStationCodes": ["DEL"],
+        "destinationStationCodes": ["BOM"],
+        "originCityName": "Delhi",
+        "destinationCityName": "Mumbai"
+      }
+    }
+  ],
+  "passengers": {
+    "residentCountry": "IN",
+    "types": [
+      {
+        "count": 1,
+        "discountCode": "",
+        "type": "ADT"
+      }
+    ]
+  },
+  "infantCount": 0,
+  "taxesAndFees": "TaxesAndFees",
+  "totalPassengerCount": 1,
+  "searchType": "OneWay",
+  "extraSeat": {
+    "adultDoubleSeat": 0,
+    "adultTripleSeat": 0,
+    "seniorCitizenDoubleSeat": 0,
+    "seniorCtizenTripleSeat": 0,
+    "childrenDoubleSeat": 0,
+    "childrenTripleSeat": 0
+  },
+  "isRedeemTransaction": false,
+  "adobeData": {
+    "product": {
+      "productInfo": {
+        "payType": "Cash",
+        "tripType": "OneWay",
+        "sector": "DEL-BOM",
+        "departureDates": "08-01-2026",
+        "daysUntilDeparture": 1,
+        "currencyCode": "INR",
+        "specialFare": "",
+        "paxInfo": "1|1|0|0|0",
+        "doubleSeatSelected": 0,
+        "tripleSeatSelected": 0,
+        "bookingPurpose": "",
+        "promotionalCode": "",
+        "marketType": "Domestic",
+        "productViewed": {
+          "Flights": "1"
+        }
+      }
+    },
+    "loyalty": {
+      "pointsEarn": "1",
+      "pointsBurn": "0",
+      "balance": "0"
+    }
+  }
+}
+"""
+
+response = requests.post(url, data=raw_body, headers=headers)
+
+print(response.status_code)
+print(response.text)

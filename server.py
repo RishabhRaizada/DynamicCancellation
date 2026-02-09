@@ -5,20 +5,13 @@ from fastmcp import FastMCP
 from tools.validator import validate_request
 from tools.profile import find_users
 
-# -------------------------------------------------
-# LOGGING
-# -------------------------------------------------
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("flight-disruption-mcp")
 
-# -------------------------------------------------
-# MCP SERVER
-# -------------------------------------------------
+
 mcp = FastMCP("flight_disruption_mcp")
 
-# -------------------------------------------------
-# LOAD STATIC DATA
-# -------------------------------------------------
 with open("data/cancell_trigger.json", "r", encoding="utf-8") as f:
     CANCELLATIONS = json.load(f)
 
@@ -28,9 +21,7 @@ with open("data/available_seats.json", "r", encoding="utf-8") as f:
 with open("data/flights-dataa-extended.json", "r", encoding="utf-8") as f:
     FLIGHTS_DATA = json.load(f)
 
-# -------------------------------------------------
-# HELPERS
-# -------------------------------------------------
+
 def find_cancellation(pnr: str):
     for c in CANCELLATIONS:
         if c.get("pnr") == pnr:
@@ -185,7 +176,6 @@ def recover_passenger(pnr: str, last_name: str):
             }]
         }
 
-    # 4️⃣ Eligibility check
     user_info = cancellation.get("user_info", {})
     email = user_info.get("USR_EMAIL")
     phone = str(user_info.get("USR_MOBILE", ""))
@@ -209,22 +199,18 @@ def recover_passenger(pnr: str, last_name: str):
             }]
         }
 
-    # 5️⃣ Fetch CDP profile
     profile = find_users(
         last_name=last_name,
         email_or_phone=email or phone
     )
 
-    # 6️⃣ Extract alternatives
     available_seats = extract_available_seats_from_seatmap(AVAILABLE_SEATS)
     available_flights = extract_available_flights(FLIGHTS_DATA)
 
-    # 🔍 Visibility logs
     logger.info("✈️ Flights extracted: %d", len(available_flights))
     logger.info("💺 Seats extracted: %d", len(available_seats))
     logger.info("📊 Profile records: %d", len(profile) if profile else 0)
 
-    # 7️⃣ Final payload
     final_payload = {
         "final": True,
         "status": "success",
@@ -259,9 +245,7 @@ def recover_passenger(pnr: str, last_name: str):
         }]
     }
 
-# -------------------------------------------------
-# RUN SERVER
-# -------------------------------------------------
+
 if __name__ == "__main__":
     mcp.run(
         transport="streamable-http",
